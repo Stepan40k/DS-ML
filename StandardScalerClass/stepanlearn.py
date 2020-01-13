@@ -1,4 +1,27 @@
 import numpy as np
+import numba as nb
+from math import isnan
+
+
+# Ускоренная функция расчета среднего
+# Модифицируем baseline-функцию учетом возможных пропусков в данных
+@nb.jit(nopython=True)
+def nb_mean(arr):
+    return np.nansum(arr) / len(arr)
+
+# Ускоренная функция расчета стандартного несмещенного отклонения
+# Модифицируем baseline-функцию учетом возможных пропусков в данных
+@nb.jit(nopython=True)
+def nb_std(arr):
+    l = arr.shape[0]
+    mean = nb_mean(arr)
+    sumsq = 0.0
+    for i in range(l):
+        # Нашел только в модуле math такую проверку на NaN. В Numpy аналогичный метод работает иначе.
+        if not isnan(arr[i]):
+            sumsq += (arr[i] - mean) ** 2
+    result = np.sqrt(sumsq / (l - 1))
+    return result    
 
 
 class StepanStandartizator:
@@ -29,10 +52,13 @@ class StepanStandartizator:
         # Для numpy.ndarray или pd.DataFrame
         if is_np:
             for col in range(ncols):
-                self._standardizer_dict[col] = [np.mean(x[:, col]), np.nanvar(x[:, col], ddof=0)]
+                self._standardizer_dict[col] = [nb_mean(x[:, col]), nb_std(x[:, col])]
         else:
-            for col in x.columns:
-                self._standardizer_dict[col] = [x[col].mean(), x[col].var()]
+             # записываем список столбцов
+            num_columns = x.select_dtypes(exclude='object').columns.tolist()
+            # по каждому столбцу датафрейма pandas
+            for col in num_columns:
+                self._standardizer_dict[col] = [x[col].mean(), x[col].std()]
 
         return self
 
@@ -52,13 +78,10 @@ class StepanStandartizator:
         ncols = x.shape[1]
         if is_np:
             for col in range(ncols):
-                for row in range(nrows):
-                    x[row, col] = (x[row, col] - self._standardizer_dict[col][0]) / np.sqrt(
-                        self._standardizer_dict[col][1])
+                    x[:, col] = (x[:, col] - self._standardizer_dict[col][0]) / self._standardizer_dict[col][1]
         else:
-            for col in x.columns:
-                for row in range(nrows):
-                    x.iloc[row, col] = (x.iloc[row, col] - self._standardizer_dict[col][0]) / np.sqrt(
-                        self._standardizer_dict[col][1])
+            num_columns = x.select_dtypes(exclude='object').columns.tolist()
+            for col in num_columns:
+                      x[col] = (x[col] - self._standardizer_dict[col][0]) / self._standardizer_dict[col][1]
 
         return x
